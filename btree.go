@@ -116,8 +116,10 @@ func NewWithFreeList(degree int, f *FreeList) *BTree {
 		panic("bad degree")
 	}
 	return &BTree{
-		degree:   degree,
-		freelist: f,
+		op: &btreeOp{
+			degree:   degree,
+			freelist: f,
+		},
 	}
 }
 
@@ -206,7 +208,7 @@ func (s *children) pop() (out *node) {
 type node struct {
 	items    items
 	children children
-	t        *BTree
+	op       *btreeOp
 }
 
 // split splits the given node at the given index.  The current node shrinks,
@@ -214,7 +216,7 @@ type node struct {
 // containing all items/children after it.
 func (n *node) split(i int) (Item, *node) {
 	item := n.items[i]
-	next := n.t.newNode()
+	next := n.op.newNode()
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
 	if len(n.children) > 0 {
@@ -414,7 +416,7 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		child.items = append(child.items, mergeItem)
 		child.items = append(child.items, mergeChild.items...)
 		child.children = append(child.children, mergeChild.children...)
-		n.t.freeNode(mergeChild)
+		n.op.freeNode(mergeChild)
 	}
 	return n.remove(item, minItems, typ)
 }
@@ -457,38 +459,29 @@ func (n *node) print(w io.Writer, level int) {
 	}
 }
 
-// BTree is an implementation of a B-Tree.
-//
-// BTree stores Item instances in an ordered structure, allowing easy insertion,
-// removal, and iteration.
-//
-// Write operations are not safe for concurrent mutation by multiple
-// goroutines, but Read operations are.
-type BTree struct {
+type btreeOp struct {
 	degree   int
-	length   int
-	root     *node
 	freelist *FreeList
 }
 
 // maxItems returns the max number of items to allow per node.
-func (t *BTree) maxItems() int {
-	return t.degree*2 - 1
+func (o *btreeOp) maxItems() int {
+	return o.degree*2 - 1
 }
 
 // minItems returns the min number of items to allow per node (ignored for the
 // root node).
-func (t *BTree) minItems() int {
-	return t.degree - 1
+func (o *btreeOp) minItems() int {
+	return o.degree - 1
 }
 
-func (t *BTree) newNode() (n *node) {
-	n = t.freelist.newNode()
-	n.t = t
+func (o *btreeOp) newNode() (n *node) {
+	n = o.freelist.newNode()
+	n.op = o
 	return
 }
 
-func (t *BTree) freeNode(n *node) {
+func (o *btreeOp) freeNode(n *node) {
 	for i := range n.items {
 		n.items[i] = nil // clear to allow GC
 	}
@@ -497,8 +490,21 @@ func (t *BTree) freeNode(n *node) {
 		n.children[i] = nil // clear to allow GC
 	}
 	n.children = n.children[:0]
-	n.t = nil // clear to allow GC
-	t.freelist.freeNode(n)
+	n.op = nil // clear to allow GC
+	o.freelist.freeNode(n)
+}
+
+// BTree is an implementation of a B-Tree.
+//
+// BTree stores Item instances in an ordered structure, allowing easy insertion,
+// removal, and iteration.
+//
+// Write operations are not safe for concurrent mutation by multiple
+// goroutines, but Read operations are.
+type BTree struct {
+	op     *btreeOp
+	length int
+	root   *node
 }
 
 // ReplaceOrInsert adds the given item to the tree.  If an item in the tree
@@ -511,18 +517,18 @@ func (t *BTree) ReplaceOrInsert(item Item) Item {
 		panic("nil item being added to BTree")
 	}
 	if t.root == nil {
-		t.root = t.newNode()
+		t.root = t.op.newNode()
 		t.root.items = append(t.root.items, item)
 		t.length++
 		return nil
-	} else if len(t.root.items) >= t.maxItems() {
-		item2, second := t.root.split(t.maxItems() / 2)
+	} else if len(t.root.items) >= t.op.maxItems() {
+		item2, second := t.root.split(t.op.maxItems() / 2)
 		oldroot := t.root
-		t.root = t.newNode()
+		t.root = t.op.newNode()
 		t.root.items = append(t.root.items, item2)
 		t.root.children = append(t.root.children, oldroot, second)
 	}
-	out := t.root.insert(item, t.maxItems())
+	out := t.root.insert(item, t.op.maxItems())
 	if out == nil {
 		t.length++
 	}
@@ -551,11 +557,11 @@ func (t *BTree) deleteItem(item Item, typ toRemove) Item {
 	if t.root == nil || len(t.root.items) == 0 {
 		return nil
 	}
-	out := t.root.remove(item, t.minItems(), typ)
+	out := t.root.remove(item, t.op.minItems(), typ)
 	if len(t.root.items) == 0 && len(t.root.children) > 0 {
 		oldroot := t.root
 		t.root = t.root.children[0]
-		t.freeNode(oldroot)
+		t.op.freeNode(oldroot)
 	}
 	if out != nil {
 		t.length--
