@@ -211,12 +211,19 @@ type node struct {
 	op       *btreeOp
 }
 
+func (n *node) newNode(writables copyOnWriteSet) *node {
+	if writables == nil {
+		return n.op.newNode()
+	}
+	return writables.newNode(n.op)
+}
+
 // split splits the given node at the given index.  The current node shrinks,
 // and this function returns the item that existed at that index and a new node
 // containing all items/children after it.
-func (n *node) split(i int) (Item, *node) {
+func (n *node) split(i int, writables copyOnWriteSet) (Item, *node) {
 	item := n.items[i]
-	next := n.op.newNode()
+	next := n.newNode(writables)
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
 	if len(n.children) > 0 {
@@ -228,12 +235,13 @@ func (n *node) split(i int) (Item, *node) {
 
 // maybeSplitChild checks if a child should be split, and if so splits it.
 // Returns whether or not a split occurred.
-func (n *node) maybeSplitChild(i, maxItems int) bool {
+func (n *node) maybeSplitChild(i, maxItems int, writables copyOnWriteSet) bool {
 	if len(n.children[i].items) < maxItems {
 		return false
 	}
+	n.children[i] = writables.writableNode(n.children[i])
 	first := n.children[i]
-	item, second := first.split(maxItems / 2)
+	item, second := first.split(maxItems/2, writables)
 	n.items.insertAt(i, item)
 	n.children.insertAt(i+1, second)
 	return true
@@ -242,7 +250,7 @@ func (n *node) maybeSplitChild(i, maxItems int) bool {
 // insert inserts an item into the subtree rooted at this node, making sure
 // no nodes in the subtree exceed maxItems items.  Should an equivalent item be
 // be found/replaced by insert, it will be returned.
-func (n *node) insert(item Item, maxItems int) Item {
+func (n *node) insert(item Item, maxItems int, writables copyOnWriteSet) Item {
 	i, found := n.items.find(item)
 	if found {
 		out := n.items[i]
@@ -253,7 +261,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 		n.items.insertAt(i, item)
 		return nil
 	}
-	if n.maybeSplitChild(i, maxItems) {
+	if n.maybeSplitChild(i, maxItems, writables) {
 		inTree := n.items[i]
 		switch {
 		case item.Less(inTree):
@@ -266,7 +274,8 @@ func (n *node) insert(item Item, maxItems int) Item {
 			return out
 		}
 	}
-	return n.children[i].insert(item, maxItems)
+	n.children[i] = writables.writableNode(n.children[i])
+	return n.children[i].insert(item, maxItems, writables)
 }
 
 // get finds the given key in the subtree and returns it.
@@ -318,7 +327,8 @@ const (
 )
 
 // remove removes an item from the subtree rooted at this node.
-func (n *node) remove(item Item, minItems int, typ toRemove) Item {
+func (n *node) remove(
+	item Item, minItems int, typ toRemove, writables copyOnWriteSet) Item {
 	var i int
 	var found bool
 	switch typ {
@@ -344,13 +354,14 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 		panic("invalid type")
 	}
 	// If we get to here, we have children.
-	child := n.children[i]
-	if len(child.items) <= minItems {
-		return n.growChildAndRemove(i, item, minItems, typ)
+	if len(n.children[i].items) <= minItems {
+		return n.growChildAndRemove(i, item, minItems, typ, writables)
 	}
 	// Either we had enough items to begin with, or we've done some
 	// merging/stealing, because we've got enough now and we're ready to return
 	// stuff.
+	n.children[i] = writables.writableNode(n.children[i])
+	child := n.children[i]
 	if found {
 		// The item exists at index 'i', and the child we've selected can give us a
 		// predecessor, since if we've gotten here it's got > minItems items in it.
@@ -358,12 +369,12 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 		// We use our special-case 'remove' call with typ=maxItem to pull the
 		// predecessor of item i (the rightmost leaf of our immediate left child)
 		// and set it into where we pulled the item from.
-		n.items[i] = child.remove(nil, minItems, removeMax)
+		n.items[i] = child.remove(nil, minItems, removeMax, writables)
 		return out
 	}
 	// Final recursive call.  Once we're here, we know that the item isn't in this
 	// node and that the child is big enough to remove from.
-	return child.remove(item, minItems, typ)
+	return child.remove(item, minItems, typ, writables)
 }
 
 // growChildAndRemove grows child 'i' to make sure it's possible to remove an
@@ -385,10 +396,17 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 // We then simply redo our remove call, and the second time (regardless of
 // whether we're in case 1 or 2), we'll have enough items and can guarantee
 // that we hit case A.
-func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) Item {
-	child := n.children[i]
+func (n *node) growChildAndRemove(
+	i int,
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet) Item {
 	if i > 0 && len(n.children[i-1].items) > minItems {
 		// Steal from left child
+		n.children[i] = writables.writableNode(n.children[i])
+		child := n.children[i]
+		n.children[i-1] = writables.writableNode(n.children[i-1])
 		stealFrom := n.children[i-1]
 		stolenItem := stealFrom.items.pop()
 		child.items.insertAt(0, n.items[i-1])
@@ -398,6 +416,9 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		}
 	} else if i < len(n.items) && len(n.children[i+1].items) > minItems {
 		// steal from right child
+		n.children[i] = writables.writableNode(n.children[i])
+		child := n.children[i]
+		n.children[i+1] = writables.writableNode(n.children[i+1])
 		stealFrom := n.children[i+1]
 		stolenItem := stealFrom.items.removeAt(0)
 		child.items = append(child.items, n.items[i])
@@ -408,17 +429,20 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 	} else {
 		if i >= len(n.items) {
 			i--
-			child = n.children[i]
 		}
 		// merge with right child
+		n.children[i] = writables.writableNode(n.children[i])
+		child := n.children[i]
 		mergeItem := n.items.removeAt(i)
 		mergeChild := n.children.removeAt(i + 1)
 		child.items = append(child.items, mergeItem)
 		child.items = append(child.items, mergeChild.items...)
 		child.children = append(child.children, mergeChild.children...)
-		n.op.freeNode(mergeChild)
+		if writables == nil {
+			n.op.freeNode(mergeChild)
+		}
 	}
-	return n.remove(item, minItems, typ)
+	return n.remove(item, minItems, typ, writables)
 }
 
 // iterate provides a simple method for iterating over elements in the tree.
@@ -457,6 +481,26 @@ func (n *node) print(w io.Writer, level int) {
 	for _, c := range n.children {
 		c.print(w, level+1)
 	}
+}
+
+type copyOnWriteSet map[*node]bool
+
+func (s copyOnWriteSet) newNode(op *btreeOp) *node {
+	result := &node{op: op}
+	s[result] = true
+	return result
+}
+
+func (s copyOnWriteSet) writableNode(n *node) *node {
+	if s == nil || s[n] {
+		return n
+	}
+	result := s.newNode(n.op)
+	result.items = append(result.items, n.items...)
+	if len(n.children) > 0 {
+		result.children = append(result.children, n.children...)
+	}
+	return result
 }
 
 type btreeOp struct {
@@ -522,13 +566,13 @@ func (t *BTree) ReplaceOrInsert(item Item) Item {
 		t.length++
 		return nil
 	} else if len(t.root.items) >= t.op.maxItems() {
-		item2, second := t.root.split(t.op.maxItems() / 2)
+		item2, second := t.root.split(t.op.maxItems()/2, nil)
 		oldroot := t.root
 		t.root = t.op.newNode()
 		t.root.items = append(t.root.items, item2)
 		t.root.children = append(t.root.children, oldroot, second)
 	}
-	out := t.root.insert(item, t.op.maxItems())
+	out := t.root.insert(item, t.op.maxItems(), nil)
 	if out == nil {
 		t.length++
 	}
@@ -557,7 +601,7 @@ func (t *BTree) deleteItem(item Item, typ toRemove) Item {
 	if t.root == nil || len(t.root.items) == 0 {
 		return nil
 	}
-	out := t.root.remove(item, t.op.minItems(), typ)
+	out := t.root.remove(item, t.op.minItems(), typ, nil)
 	if len(t.root.items) == 0 && len(t.root.children) > 0 {
 		oldroot := t.root
 		t.root = t.root.children[0]
