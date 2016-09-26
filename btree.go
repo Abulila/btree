@@ -214,9 +214,12 @@ type node struct {
 // split splits the given node at the given index.  The current node shrinks,
 // and this function returns the item that existed at that index and a new node
 // containing all items/children after it.
-func (n *node) split(i int) (Item, *node) {
+func (n *node) _split(
+	i int,
+	writables writableNodeSet,
+	newNode func(*node, writableNodeSet) *node) (Item, *node) {
 	item := n.items[i]
-	next := n.op.newNode()
+	next := newNode(n, writables)
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
 	if len(n.children) > 0 {
@@ -226,23 +229,87 @@ func (n *node) split(i int) (Item, *node) {
 	return item, next
 }
 
-// maybeSplitChild checks if a child should be split, and if so splits it.
-// Returns whether or not a split occurred.
-func (n *node) maybeSplitChild(i, maxItems int) bool {
+func newNodeFunc(n *node, writables writableNodeSet) *node {
+	return n.op.newNode()
+}
+
+// split splits the given node at the given index.  The current node shrinks,
+// and this function returns the item that existed at that index and a new node
+// containing all items/children after it.
+func (n *node) split(i int) (Item, *node) {
+	return n._split(i, nil, newNodeFunc)
+}
+
+func pNewNodeFunc(n *node, writables writableNodeSet) *node {
+	return writables.newNode(n.op)
+}
+
+// pSplit is the persistent version of split
+func (n *node) pSplit(i int, writables writableNodeSet) (*node, Item, *node) {
+	wn := writables.writableNode(n)
+	item, next := wn._split(i, writables, pNewNodeFunc)
+	return wn, item, next
+}
+
+func (n *node) _maybeSplitChild(
+	i, maxItems int,
+	writables writableNodeSet,
+	splitChild func(*node, int, int, writableNodeSet) (Item, *node)) bool {
 	if len(n.children[i].items) < maxItems {
 		return false
 	}
-	first := n.children[i]
-	item, second := first.split(maxItems / 2)
+	item, second := splitChild(n, i, maxItems/2, writables)
 	n.items.insertAt(i, item)
 	n.children.insertAt(i+1, second)
 	return true
 }
 
+func splitChildFunc(
+	n *node,
+	childIndex int,
+	splitIndex int,
+	writables writableNodeSet) (Item, *node) {
+	first := n.children[childIndex]
+	return first.split(splitIndex)
+}
+
+// maybeSplitChild checks if a child should be split, and if so splits it.
+// Returns whether or not a split occurred.
+func (n *node) maybeSplitChild(i, maxItems int) bool {
+	return n._maybeSplitChild(i, maxItems, nil, splitChildFunc)
+}
+
+func pSplitChildFunc(
+	n *node,
+	childIndex int,
+	splitIndex int,
+	writables writableNodeSet) (Item, *node) {
+	child := n.children[childIndex]
+	child, item, second := child.pSplit(splitIndex, writables)
+	n.children[childIndex] = child
+	return item, second
+}
+
+// pMaybeSplitChild is the persistent version of maybeSplitChild
+// always returning a writable version of this node.
+func (n *node) pMaybeSplitChild(
+	i, maxItems int, writables writableNodeSet) (*node, bool) {
+	wn := writables.writableNode(n)
+	result := wn._maybeSplitChild(
+		i, maxItems, writables, pSplitChildFunc)
+	return wn, result
+}
+
 // insert inserts an item into the subtree rooted at this node, making sure
 // no nodes in the subtree exceed maxItems items.  Should an equivalent item be
 // be found/replaced by insert, it will be returned.
-func (n *node) insert(item Item, maxItems int) Item {
+func (n *node) _insert(
+	item Item,
+	maxItems int,
+	writables writableNodeSet,
+	maybeSplitChild func(*node, int, int, writableNodeSet) bool,
+	childInsert func(*node, int, Item, int, writableNodeSet) Item,
+) Item {
 	i, found := n.items.find(item)
 	if found {
 		out := n.items[i]
@@ -253,7 +320,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 		n.items.insertAt(i, item)
 		return nil
 	}
-	if n.maybeSplitChild(i, maxItems) {
+	if maybeSplitChild(n, i, maxItems, writables) {
 		inTree := n.items[i]
 		switch {
 		case item.Less(inTree):
@@ -266,7 +333,66 @@ func (n *node) insert(item Item, maxItems int) Item {
 			return out
 		}
 	}
-	return n.children[i].insert(item, maxItems)
+	return childInsert(n, i, item, maxItems, writables)
+}
+
+func maybeSplitChildFunc(
+	n *node,
+	childIndex int,
+	maxItems int,
+	writables writableNodeSet) bool {
+	return n.maybeSplitChild(childIndex, maxItems)
+}
+
+func childInsertFunc(
+	n *node,
+	childIndex int,
+	item Item,
+	maxItems int,
+	writables writableNodeSet) Item {
+	return n.children[childIndex].insert(item, maxItems)
+}
+
+// insert inserts an item into the subtree rooted at this node, making sure
+// no nodes in the subtree exceed maxItems items.  Should an equivalent item be
+// be found/replaced by insert, it will be returned.
+func (n *node) insert(item Item, maxItems int) Item {
+	return n._insert(
+		item, maxItems, nil, maybeSplitChildFunc, childInsertFunc)
+}
+
+func pMaybeSplitChildFunc(
+	n *node,
+	childIndex int,
+	maxItems int,
+	writables writableNodeSet) bool {
+	_, result := n.pMaybeSplitChild(childIndex, maxItems, writables)
+	return result
+}
+
+func pChildInsertFunc(
+	n *node,
+	childIndex int,
+	item Item,
+	maxItems int,
+	writables writableNodeSet) Item {
+	newChild, out := n.children[childIndex].pInsert(
+		item, maxItems, writables)
+	n.children[childIndex] = newChild
+	return out
+}
+
+// persistent form of insert
+func (n *node) pInsert(
+	item Item, maxItems int, writables writableNodeSet) (*node, Item) {
+	wn := writables.writableNode(n)
+	result := wn._insert(
+		item,
+		maxItems,
+		writables,
+		pMaybeSplitChildFunc,
+		pChildInsertFunc)
+	return wn, result
 }
 
 // get finds the given key in the subtree and returns it.
@@ -457,6 +583,26 @@ func (n *node) print(w io.Writer, level int) {
 	for _, c := range n.children {
 		c.print(w, level+1)
 	}
+}
+
+type writableNodeSet map[*node]bool
+
+func (s writableNodeSet) newNode(op *btreeOp) *node {
+	result := &node{op: op}
+	s[result] = true
+	return result
+}
+
+func (s writableNodeSet) writableNode(n *node) *node {
+	if s[n] {
+		return n
+	}
+	result := s.newNode(n.op)
+	result.items = append(result.items, n.items...)
+	if len(n.children) > 0 {
+		result.children = append(result.children, n.children...)
+	}
+	return result
 }
 
 type btreeOp struct {
