@@ -451,8 +451,18 @@ const (
 	removeMax                  // removes largest item in the subtree
 )
 
-// remove removes an item from the subtree rooted at this node.
-func (n *node) remove(item Item, minItems int, typ toRemove) Item {
+// _remove is the helper function for both ephemeral and persistent
+// forms of remove.
+func (n *node) _remove(
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet,
+	growChildAndRemove func(
+		*node, int, Item, int, toRemove, copyOnWriteSet) Item,
+	childRemove func(
+		*node, int, Item, int, toRemove, copyOnWriteSet) Item,
+) Item {
 	var i int
 	var found bool
 	switch typ {
@@ -480,7 +490,7 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	// If we get to here, we have children.
 	child := n.children[i]
 	if len(child.items) <= minItems {
-		return n.growChildAndRemove(i, item, minItems, typ)
+		return growChildAndRemove(n, i, item, minItems, typ, writables)
 	}
 	// Either we had enough items to begin with, or we've done some
 	// merging/stealing, because we've got enough now and we're ready to return
@@ -488,16 +498,99 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	if found {
 		// The item exists at index 'i', and the child we've selected can give us a
 		// predecessor, since if we've gotten here it's got > minItems items in it.
-		out := n.items[i]
 		// We use our special-case 'remove' call with typ=maxItem to pull the
 		// predecessor of item i (the rightmost leaf of our immediate left child)
 		// and set it into where we pulled the item from.
-		n.items[i] = child.remove(nil, minItems, removeMax)
-		return out
+		return childRemove(n, i, nil, minItems, removeMax, writables)
 	}
 	// Final recursive call.  Once we're here, we know that the item isn't in this
 	// node and that the child is big enough to remove from.
-	return child.remove(item, minItems, typ)
+	return childRemove(n, i, item, minItems, typ, writables)
+}
+
+// growChildAndRemoveShim is the ephemeral shim
+// for growing a child and removing
+func growChildAndRemoveShim(
+	n *node,
+	childIndex int,
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet) Item {
+	return n.growChildAndRemove(childIndex, item, minItems, typ)
+}
+
+// childRemoveShim is the ephemeral shim for removing from a child
+func childRemoveShim(
+	n *node,
+	childIndex int,
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet) Item {
+	if item == nil {
+		out := n.items[childIndex]
+		n.items[childIndex] = n.children[childIndex].remove(
+			nil, minItems, removeMax)
+		return out
+	}
+	return n.children[childIndex].remove(item, minItems, typ)
+}
+
+// remove removes an item from the subtree rooted at this node.
+func (n *node) remove(item Item, minItems int, typ toRemove) Item {
+	return n._remove(
+		item, minItems, typ, nil, growChildAndRemoveShim, childRemoveShim)
+}
+
+// pGrowChildAndRemoveShim is the persistent shim
+// for growing a child and removing
+func pGrowChildAndRemoveShim(
+	n *node,
+	childIndex int,
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet) Item {
+	_, result := n.pGrowChildAndRemove(
+		childIndex, item, minItems, typ, writables)
+	return result
+}
+
+// pChildRemoveShim is the persistent shim for removing from a child
+func pChildRemoveShim(
+	n *node,
+	childIndex int,
+	item Item,
+	minItems int,
+	typ toRemove,
+	writables copyOnWriteSet) Item {
+	if item == nil {
+		out := n.items[childIndex]
+		childNode, removed := n.children[childIndex].pRemove(
+			nil, minItems, removeMax, writables)
+		n.children[childIndex], n.items[childIndex] = childNode, removed
+		return out
+	}
+	childNode, removed := n.children[childIndex].pRemove(
+		item, minItems, typ, writables)
+	n.children[childIndex] = childNode
+	return removed
+}
+
+// pRemove is the persistent form of remove
+func (n *node) pRemove(
+	item Item, minItems int, typ toRemove, writables copyOnWriteSet) (
+	*node, Item) {
+	wn := writables.writableNode(n)
+	result := n._remove(
+		item,
+		minItems,
+		typ,
+		writables,
+		pGrowChildAndRemoveShim,
+		pChildRemoveShim)
+	return wn, result
 }
 
 // growChildAndRemove grows child 'i' to make sure it's possible to remove an
@@ -553,6 +646,10 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		n.op.freeNode(mergeChild)
 	}
 	return n.remove(item, minItems, typ)
+}
+
+func (n *node) pGrowChildAndRemove(i int, item Item, minItems int, typ toRemove, writables copyOnWriteSet) (*node, Item) {
+	return nil, nil
 }
 
 // iterate provides a simple method for iterating over elements in the tree.
