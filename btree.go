@@ -216,8 +216,8 @@ type node struct {
 // containing all items/children after it.
 func (n *node) _split(
 	i int,
-	writables writableNodeSet,
-	newNode func(*node, writableNodeSet) *node) (Item, *node) {
+	writables copyOnWriteSet,
+	newNode func(*node, copyOnWriteSet) *node) (Item, *node) {
 	item := n.items[i]
 	next := newNode(n, writables)
 	next.items = append(next.items, n.items[i+1:]...)
@@ -229,7 +229,7 @@ func (n *node) _split(
 	return item, next
 }
 
-func newNodeFunc(n *node, writables writableNodeSet) *node {
+func newNodeShim(n *node, writables copyOnWriteSet) *node {
 	return n.op.newNode()
 }
 
@@ -237,24 +237,24 @@ func newNodeFunc(n *node, writables writableNodeSet) *node {
 // and this function returns the item that existed at that index and a new node
 // containing all items/children after it.
 func (n *node) split(i int) (Item, *node) {
-	return n._split(i, nil, newNodeFunc)
+	return n._split(i, nil, newNodeShim)
 }
 
-func pNewNodeFunc(n *node, writables writableNodeSet) *node {
+func pNewNodeShim(n *node, writables copyOnWriteSet) *node {
 	return writables.newNode(n.op)
 }
 
 // pSplit is the persistent version of split
-func (n *node) pSplit(i int, writables writableNodeSet) (*node, Item, *node) {
+func (n *node) pSplit(i int, writables copyOnWriteSet) (*node, Item, *node) {
 	wn := writables.writableNode(n)
-	item, next := wn._split(i, writables, pNewNodeFunc)
+	item, next := wn._split(i, writables, pNewNodeShim)
 	return wn, item, next
 }
 
 func (n *node) _maybeSplitChild(
 	i, maxItems int,
-	writables writableNodeSet,
-	splitChild func(*node, int, int, writableNodeSet) (Item, *node)) bool {
+	writables copyOnWriteSet,
+	splitChild func(*node, int, int, copyOnWriteSet) (Item, *node)) bool {
 	if len(n.children[i].items) < maxItems {
 		return false
 	}
@@ -264,11 +264,11 @@ func (n *node) _maybeSplitChild(
 	return true
 }
 
-func splitChildFunc(
+func splitChildShim(
 	n *node,
 	childIndex int,
 	splitIndex int,
-	writables writableNodeSet) (Item, *node) {
+	writables copyOnWriteSet) (Item, *node) {
 	first := n.children[childIndex]
 	return first.split(splitIndex)
 }
@@ -276,14 +276,14 @@ func splitChildFunc(
 // maybeSplitChild checks if a child should be split, and if so splits it.
 // Returns whether or not a split occurred.
 func (n *node) maybeSplitChild(i, maxItems int) bool {
-	return n._maybeSplitChild(i, maxItems, nil, splitChildFunc)
+	return n._maybeSplitChild(i, maxItems, nil, splitChildShim)
 }
 
-func pSplitChildFunc(
+func pSplitChildShim(
 	n *node,
 	childIndex int,
 	splitIndex int,
-	writables writableNodeSet) (Item, *node) {
+	writables copyOnWriteSet) (Item, *node) {
 	child := n.children[childIndex]
 	child, item, second := child.pSplit(splitIndex, writables)
 	n.children[childIndex] = child
@@ -293,10 +293,10 @@ func pSplitChildFunc(
 // pMaybeSplitChild is the persistent version of maybeSplitChild
 // always returning a writable version of this node.
 func (n *node) pMaybeSplitChild(
-	i, maxItems int, writables writableNodeSet) (*node, bool) {
+	i, maxItems int, writables copyOnWriteSet) (*node, bool) {
 	wn := writables.writableNode(n)
 	result := wn._maybeSplitChild(
-		i, maxItems, writables, pSplitChildFunc)
+		i, maxItems, writables, pSplitChildShim)
 	return wn, result
 }
 
@@ -306,9 +306,9 @@ func (n *node) pMaybeSplitChild(
 func (n *node) _insert(
 	item Item,
 	maxItems int,
-	writables writableNodeSet,
-	maybeSplitChild func(*node, int, int, writableNodeSet) bool,
-	childInsert func(*node, int, Item, int, writableNodeSet) Item,
+	writables copyOnWriteSet,
+	maybeSplitChild func(*node, int, int, copyOnWriteSet) bool,
+	childInsert func(*node, int, Item, int, copyOnWriteSet) Item,
 ) Item {
 	i, found := n.items.find(item)
 	if found {
@@ -336,20 +336,20 @@ func (n *node) _insert(
 	return childInsert(n, i, item, maxItems, writables)
 }
 
-func maybeSplitChildFunc(
+func maybeSplitChildShim(
 	n *node,
 	childIndex int,
 	maxItems int,
-	writables writableNodeSet) bool {
+	writables copyOnWriteSet) bool {
 	return n.maybeSplitChild(childIndex, maxItems)
 }
 
-func childInsertFunc(
+func childInsertShim(
 	n *node,
 	childIndex int,
 	item Item,
 	maxItems int,
-	writables writableNodeSet) Item {
+	writables copyOnWriteSet) Item {
 	return n.children[childIndex].insert(item, maxItems)
 }
 
@@ -358,24 +358,24 @@ func childInsertFunc(
 // be found/replaced by insert, it will be returned.
 func (n *node) insert(item Item, maxItems int) Item {
 	return n._insert(
-		item, maxItems, nil, maybeSplitChildFunc, childInsertFunc)
+		item, maxItems, nil, maybeSplitChildShim, childInsertShim)
 }
 
-func pMaybeSplitChildFunc(
+func pMaybeSplitChildShim(
 	n *node,
 	childIndex int,
 	maxItems int,
-	writables writableNodeSet) bool {
+	writables copyOnWriteSet) bool {
 	_, result := n.pMaybeSplitChild(childIndex, maxItems, writables)
 	return result
 }
 
-func pChildInsertFunc(
+func pChildInsertShim(
 	n *node,
 	childIndex int,
 	item Item,
 	maxItems int,
-	writables writableNodeSet) Item {
+	writables copyOnWriteSet) Item {
 	newChild, out := n.children[childIndex].pInsert(
 		item, maxItems, writables)
 	n.children[childIndex] = newChild
@@ -384,14 +384,14 @@ func pChildInsertFunc(
 
 // persistent form of insert
 func (n *node) pInsert(
-	item Item, maxItems int, writables writableNodeSet) (*node, Item) {
+	item Item, maxItems int, writables copyOnWriteSet) (*node, Item) {
 	wn := writables.writableNode(n)
 	result := wn._insert(
 		item,
 		maxItems,
 		writables,
-		pMaybeSplitChildFunc,
-		pChildInsertFunc)
+		pMaybeSplitChildShim,
+		pChildInsertShim)
 	return wn, result
 }
 
@@ -585,15 +585,15 @@ func (n *node) print(w io.Writer, level int) {
 	}
 }
 
-type writableNodeSet map[*node]bool
+type copyOnWriteSet map[*node]bool
 
-func (s writableNodeSet) newNode(op *btreeOp) *node {
+func (s copyOnWriteSet) newNode(op *btreeOp) *node {
 	result := &node{op: op}
 	s[result] = true
 	return result
 }
 
-func (s writableNodeSet) writableNode(n *node) *node {
+func (s copyOnWriteSet) writableNode(n *node) *node {
 	if s[n] {
 		return n
 	}
