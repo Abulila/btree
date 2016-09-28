@@ -211,9 +211,8 @@ type node struct {
 	op       *btreeOp
 }
 
-// split splits the given node at the given index.  The current node shrinks,
-// and this function returns the item that existed at that index and a new node
-// containing all items/children after it.
+// _split is the helper function for both ephemeral and persistent forms
+//  of split.
 func (n *node) _split(
 	i int,
 	writables copyOnWriteSet,
@@ -229,6 +228,7 @@ func (n *node) _split(
 	return item, next
 }
 
+// newNodeShim is the ephemeral shim to create a new node
 func newNodeShim(n *node, writables copyOnWriteSet) *node {
 	return n.op.newNode()
 }
@@ -240,6 +240,7 @@ func (n *node) split(i int) (Item, *node) {
 	return n._split(i, nil, newNodeShim)
 }
 
+// pNewNodeShim is the persistent shim to create a new node
 func pNewNodeShim(n *node, writables copyOnWriteSet) *node {
 	return writables.newNode(n.op)
 }
@@ -251,6 +252,8 @@ func (n *node) pSplit(i int, writables copyOnWriteSet) (*node, Item, *node) {
 	return wn, item, next
 }
 
+// _maybeSplitChild is the helper function for both ephemeral and persistent
+// forms of maybeSplitChild.
 func (n *node) _maybeSplitChild(
 	i, maxItems int,
 	writables copyOnWriteSet,
@@ -264,6 +267,7 @@ func (n *node) _maybeSplitChild(
 	return true
 }
 
+// splitChildShim is the ephemeral shim to split a child
 func splitChildShim(
 	n *node,
 	childIndex int,
@@ -279,6 +283,7 @@ func (n *node) maybeSplitChild(i, maxItems int) bool {
 	return n._maybeSplitChild(i, maxItems, nil, splitChildShim)
 }
 
+// pSplitChildShim is the persistent shim to split a child
 func pSplitChildShim(
 	n *node,
 	childIndex int,
@@ -300,9 +305,8 @@ func (n *node) pMaybeSplitChild(
 	return wn, result
 }
 
-// insert inserts an item into the subtree rooted at this node, making sure
-// no nodes in the subtree exceed maxItems items.  Should an equivalent item be
-// be found/replaced by insert, it will be returned.
+// _insert is the helper function for both ephemeral and persistent
+// forms of insert.
 func (n *node) _insert(
 	item Item,
 	maxItems int,
@@ -336,6 +340,7 @@ func (n *node) _insert(
 	return childInsert(n, i, item, maxItems, writables)
 }
 
+// maybeSplitChildShim is the ephemeral shim to maybe split a child
 func maybeSplitChildShim(
 	n *node,
 	childIndex int,
@@ -344,6 +349,7 @@ func maybeSplitChildShim(
 	return n.maybeSplitChild(childIndex, maxItems)
 }
 
+// childInsertShim is the ephemeral shim to insert into a child
 func childInsertShim(
 	n *node,
 	childIndex int,
@@ -361,6 +367,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 		item, maxItems, nil, maybeSplitChildShim, childInsertShim)
 }
 
+// pMaybeSplitChildShim is the persistent shim to maybe split a child
 func pMaybeSplitChildShim(
 	n *node,
 	childIndex int,
@@ -370,6 +377,7 @@ func pMaybeSplitChildShim(
 	return result
 }
 
+// pChildInsertShim is the persistent shim to insert into a child
 func pChildInsertShim(
 	n *node,
 	childIndex int,
@@ -382,7 +390,7 @@ func pChildInsertShim(
 	return out
 }
 
-// persistent form of insert
+// pInsert is the persistent form of insert
 func (n *node) pInsert(
 	item Item, maxItems int, writables copyOnWriteSet) (*node, Item) {
 	wn := writables.writableNode(n)
