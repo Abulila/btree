@@ -716,6 +716,21 @@ type ImmutableBTree struct {
 	root   *node
 }
 
+// NewImmutable creates a new B-Tree with the given degree.
+//
+// New(2), for example, will create a 2-3-4 tree (each node contains 1-3 items
+// and 2-4 children).
+func NewImmutable(degree int) *ImmutableBTree {
+	if degree <= 1 {
+		panic("bad degree")
+	}
+	return &ImmutableBTree{
+		op: &btreeOp{
+			degree: degree,
+		},
+	}
+}
+
 // AscendRange calls the iterator for every value in the tree within the range
 // [greaterOrEqual, lessThan), until iterator returns false.
 func (t *ImmutableBTree) AscendRange(greaterOrEqual, lessThan Item, iterator ItemIterator) {
@@ -769,6 +784,70 @@ func (t *ImmutableBTree) Has(key Item) bool {
 // Len returns the number of items currently in the tree.
 func (t *ImmutableBTree) Len() int {
 	return t.length
+}
+
+type Builder struct {
+	copied    bool
+	tree      *ImmutableBTree
+	writables copyOnWriteSet
+}
+
+func NewBuilder(tree *ImmutableBTree) *Builder {
+	result := &Builder{}
+	return result.Set(tree)
+}
+
+func (t *Builder) Set(tree *ImmutableBTree) *Builder {
+	t.tree = tree
+	t.copied = false
+	t.writables = make(copyOnWriteSet)
+	return t
+}
+
+// ReplaceOrInsert adds the given item to the tree.  If an item in the tree
+// already equals the given one, it is removed from the tree and returned.
+// Otherwise, nil is returned.
+//
+// nil cannot be added to the tree (will panic).
+func (t *Builder) ReplaceOrInsert(item Item) Item {
+	bt := t.writableBTree()
+	return bt.replaceOrInsert(item, t.writables)
+}
+
+// Delete removes an item equal to the passed in item from the tree, returning
+// it.  If no such item exists, returns nil.
+func (t *Builder) Delete(item Item) Item {
+	bt := t.writableBTree()
+	return bt.deleteItem(item, removeItem, t.writables)
+}
+
+// DeleteMin removes the smallest item in the tree and returns it.
+// If no such item exists, returns nil.
+func (t *Builder) DeleteMin() Item {
+	bt := t.writableBTree()
+	return bt.deleteItem(nil, removeMin, t.writables)
+}
+
+// DeleteMax removes the largest item in the tree and returns it.
+// If no such item exists, returns nil.
+func (t *Builder) DeleteMax() Item {
+	bt := t.writableBTree()
+	return bt.deleteItem(nil, removeMax, t.writables)
+}
+
+func (t *Builder) Build() *ImmutableBTree {
+	result := t.tree
+	t.Set(result)
+	return result
+}
+
+func (t *Builder) writableBTree() *BTree {
+	if !t.copied {
+		t.copied = true
+		acopy := *t.tree
+		t.tree = &acopy
+	}
+	return (*BTree)(t.tree)
 }
 
 // Int implements the Item interface for integers.
