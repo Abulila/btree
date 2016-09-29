@@ -211,19 +211,12 @@ type node struct {
 	op       *btreeOp
 }
 
-func (n *node) newNode(writables copyOnWriteSet) *node {
-	if writables == nil {
-		return n.op.newNode()
-	}
-	return writables.newNode(n.op)
-}
-
 // split splits the given node at the given index.  The current node shrinks,
 // and this function returns the item that existed at that index and a new node
 // containing all items/children after it.
 func (n *node) split(i int, writables copyOnWriteSet) (Item, *node) {
 	item := n.items[i]
-	next := n.newNode(writables)
+	next := newNode(n.op, writables)
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
 	if len(n.children) > 0 {
@@ -438,9 +431,7 @@ func (n *node) growChildAndRemove(
 		child.items = append(child.items, mergeItem)
 		child.items = append(child.items, mergeChild.items...)
 		child.children = append(child.children, mergeChild.children...)
-		if writables == nil {
-			n.op.freeNode(mergeChild)
-		}
+		freeNode(mergeChild, n.op, writables)
 	}
 	return n.remove(item, minItems, typ, writables)
 }
@@ -538,6 +529,19 @@ func (o *btreeOp) freeNode(n *node) {
 	o.freelist.freeNode(n)
 }
 
+func newNode(op *btreeOp, writables copyOnWriteSet) *node {
+	if writables == nil {
+		return op.newNode()
+	}
+	return writables.newNode(op)
+}
+
+func freeNode(n *node, op *btreeOp, writables copyOnWriteSet) {
+	if writables == nil {
+		op.freeNode(n)
+	}
+}
+
 // BTree is an implementation of a B-Tree.
 //
 // BTree stores Item instances in an ordered structure, allowing easy insertion,
@@ -551,61 +555,70 @@ type BTree struct {
 	root   *node
 }
 
-// ReplaceOrInsert adds the given item to the tree.  If an item in the tree
-// already equals the given one, it is removed from the tree and returned.
-// Otherwise, nil is returned.
-//
-// nil cannot be added to the tree (will panic).
-func (t *BTree) ReplaceOrInsert(item Item) Item {
+func (t *BTree) replaceOrInsert(item Item, writables copyOnWriteSet) Item {
 	if item == nil {
 		panic("nil item being added to BTree")
 	}
 	if t.root == nil {
-		t.root = t.op.newNode()
+
+		t.root = newNode(t.op, writables)
 		t.root.items = append(t.root.items, item)
 		t.length++
 		return nil
 	} else if len(t.root.items) >= t.op.maxItems() {
-		item2, second := t.root.split(t.op.maxItems()/2, nil)
+		t.root = writables.writableNode(t.root)
+		item2, second := t.root.split(t.op.maxItems()/2, writables)
 		oldroot := t.root
-		t.root = t.op.newNode()
+		t.root = newNode(t.op, writables)
 		t.root.items = append(t.root.items, item2)
 		t.root.children = append(t.root.children, oldroot, second)
 	}
-	out := t.root.insert(item, t.op.maxItems(), nil)
+	t.root = writables.writableNode(t.root)
+	out := t.root.insert(item, t.op.maxItems(), writables)
 	if out == nil {
 		t.length++
 	}
 	return out
 }
 
+// ReplaceOrInsert adds the given item to the tree.  If an item in the tree
+// already equals the given one, it is removed from the tree and returned.
+// Otherwise, nil is returned.
+//
+// nil cannot be added to the tree (will panic).
+func (t *BTree) ReplaceOrInsert(item Item) Item {
+	return t.replaceOrInsert(item, nil)
+}
+
 // Delete removes an item equal to the passed in item from the tree, returning
 // it.  If no such item exists, returns nil.
 func (t *BTree) Delete(item Item) Item {
-	return t.deleteItem(item, removeItem)
+	return t.deleteItem(item, removeItem, nil)
 }
 
 // DeleteMin removes the smallest item in the tree and returns it.
 // If no such item exists, returns nil.
 func (t *BTree) DeleteMin() Item {
-	return t.deleteItem(nil, removeMin)
+	return t.deleteItem(nil, removeMin, nil)
 }
 
 // DeleteMax removes the largest item in the tree and returns it.
 // If no such item exists, returns nil.
 func (t *BTree) DeleteMax() Item {
-	return t.deleteItem(nil, removeMax)
+	return t.deleteItem(nil, removeMax, nil)
 }
 
-func (t *BTree) deleteItem(item Item, typ toRemove) Item {
+func (t *BTree) deleteItem(
+	item Item, typ toRemove, writables copyOnWriteSet) Item {
 	if t.root == nil || len(t.root.items) == 0 {
 		return nil
 	}
-	out := t.root.remove(item, t.op.minItems(), typ, nil)
+	t.root = writables.writableNode(t.root)
+	out := t.root.remove(item, t.op.minItems(), typ, writables)
 	if len(t.root.items) == 0 && len(t.root.children) > 0 {
 		oldroot := t.root
 		t.root = t.root.children[0]
-		t.op.freeNode(oldroot)
+		freeNode(oldroot, t.op, writables)
 	}
 	if out != nil {
 		t.length--
