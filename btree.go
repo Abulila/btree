@@ -703,6 +703,74 @@ func (t *BTree) Len() int {
 	return t.length
 }
 
+// BTree is an implementation of a B-Tree.
+//
+// BTree stores Item instances in an ordered structure, allowing easy insertion,
+// removal, and iteration.
+//
+// Write operations are not safe for concurrent mutation by multiple
+// goroutines, but Read operations are.
+type ImmutableBTree struct {
+	op     *btreeOp
+	length int
+	root   *node
+}
+
+// AscendRange calls the iterator for every value in the tree within the range
+// [greaterOrEqual, lessThan), until iterator returns false.
+func (t *ImmutableBTree) AscendRange(greaterOrEqual, lessThan Item, iterator ItemIterator) {
+	bt := (*BTree)(t)
+	bt.AscendRange(greaterOrEqual, lessThan, iterator)
+}
+
+// AscendLessThan calls the iterator for every value in the tree within the range
+// [first, pivot), until iterator returns false.
+func (t *ImmutableBTree) AscendLessThan(pivot Item, iterator ItemIterator) {
+	bt := (*BTree)(t)
+	bt.AscendLessThan(pivot, iterator)
+}
+
+// AscendGreaterOrEqual calls the iterator for every value in the tree within
+// the range [pivot, last], until iterator returns false.
+func (t *ImmutableBTree) AscendGreaterOrEqual(pivot Item, iterator ItemIterator) {
+	bt := (*BTree)(t)
+	bt.AscendGreaterOrEqual(pivot, iterator)
+}
+
+// Ascend calls the iterator for every value in the tree within the range
+// [first, last], until iterator returns false.
+func (t *ImmutableBTree) Ascend(iterator ItemIterator) {
+	bt := (*BTree)(t)
+	bt.Ascend(iterator)
+}
+
+// Get looks for the key item in the tree, returning it.  It returns nil if
+// unable to find that item.
+func (t *ImmutableBTree) Get(key Item) Item {
+	bt := (*BTree)(t)
+	return bt.Get(key)
+}
+
+// Min returns the smallest item in the tree, or nil if the tree is empty.
+func (t *ImmutableBTree) Min() Item {
+	return min(t.root)
+}
+
+// Max returns the largest item in the tree, or nil if the tree is empty.
+func (t *ImmutableBTree) Max() Item {
+	return max(t.root)
+}
+
+// Has returns true if the given key is in the tree.
+func (t *ImmutableBTree) Has(key Item) bool {
+	return t.Get(key) != nil
+}
+
+// Len returns the number of items currently in the tree.
+func (t *ImmutableBTree) Len() int {
+	return t.length
+}
+
 // Int implements the Item interface for integers.
 type Int int
 
