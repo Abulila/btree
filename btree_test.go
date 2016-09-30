@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 )
@@ -27,6 +28,32 @@ func init() {
 	seed := time.Now().Unix()
 	fmt.Println(seed)
 	rand.Seed(seed)
+}
+
+func sorted(orig []Item) []Item {
+	toSort := make([]int, len(orig))
+	for i, item := range orig {
+		toSort[i] = int(item.(Int))
+	}
+	sort.Ints(toSort)
+	result := make([]Item, len(toSort))
+	for i, item := range toSort {
+		result[i] = Int(item)
+	}
+	return result
+}
+
+func difference(orig, subtract []Item) (result []Item) {
+	var idx int
+	subLen := len(subtract)
+	for _, item := range orig {
+		for ; idx < subLen && subtract[idx].Less(item); idx++ {
+		}
+		if idx >= subLen || item != subtract[idx] {
+			result = append(result, item)
+		}
+	}
+	return
 }
 
 // perm returns a random permutation of n Int items in the range [0, n).
@@ -59,6 +86,83 @@ func all(t ascender) (out []Item) {
 }
 
 var btreeDegree = flag.Int("degree", 32, "B-Tree degree")
+
+func TestImmutableBTree(t *testing.T) {
+	builder := NewBuilder(NewImmutable(4))
+	const treeSize = 1024
+	const sizeIncr = 32
+	for i := 0; i < 10; i++ {
+		if min := builder.Min(); min != nil {
+			t.Fatalf("empty min, got %+v", min)
+		}
+		if max := builder.Max(); max != nil {
+			t.Fatalf("empty max, got %+v", max)
+		}
+		trees := make([]*ImmutableBTree, treeSize/sizeIncr)
+		aPerm := perm(treeSize)
+		for i, item := range aPerm {
+			if i%sizeIncr == 0 {
+				trees[i/sizeIncr] = builder.Build()
+			}
+			if x := builder.ReplaceOrInsert(item); x != nil {
+				t.Fatal("insert found item", item)
+			}
+		}
+		for _, item := range perm(treeSize) {
+			if x := builder.ReplaceOrInsert(item); x == nil {
+				t.Fatal("insert didn't find item", item)
+			}
+		}
+		fullTree := builder.Build()
+		if min, want := fullTree.Min(), Item(Int(0)); min != want {
+			t.Fatalf("min: want %+v, got %+v", want, min)
+		}
+		if max, want := fullTree.Max(), Item(Int(treeSize-1)); max != want {
+			t.Fatalf("max: want %+v, got %+v", want, max)
+		}
+		got := all(fullTree)
+		want := rang(treeSize)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+		}
+		// Now check partial trees
+		for i, partialTree := range trees {
+			got := all(partialTree)
+			if i == 0 {
+				if len(got) > 0 {
+					t.Fatalf("Expected empty, got %v", got)
+				}
+			} else {
+				want := sorted(aPerm[:(i * sizeIncr)])
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+				}
+			}
+		}
+		builder.Set(fullTree)
+		aPerm = perm(treeSize)
+		for i, item := range aPerm {
+			if i%sizeIncr == 0 {
+				trees[i/sizeIncr] = builder.Build()
+			}
+			if x := builder.Delete(item); x == nil {
+				t.Fatalf("didn't find %v", item)
+			}
+		}
+		// Now check partial trees
+		allNumbers := rang(treeSize)
+		for i, partialTree := range trees {
+			got := all(partialTree)
+			want := difference(allNumbers, sorted(aPerm[:(i*sizeIncr)]))
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+			}
+		}
+		if got = all(builder); len(got) > 0 {
+			t.Fatalf("some left!: %v", got)
+		}
+	}
+}
 
 func TestBTree(t *testing.T) {
 	tr := New(*btreeDegree)
