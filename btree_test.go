@@ -196,6 +196,30 @@ func TestDeleteMin(t *testing.T) {
 	}
 }
 
+func TestImmutableDeleteMin(t *testing.T) {
+	builder := NewBuilder(NewImmutable(3))
+	for _, v := range perm(100) {
+		builder.ReplaceOrInsert(v)
+	}
+	zeroTo99 := builder.Build()
+	var got []Item
+	for v := builder.DeleteMin(); v != nil; v = builder.DeleteMin() {
+		got = append(got, v)
+	}
+	empty := builder.Build()
+	if want := rang(100); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange:\n got: %v\nwant: %v", got, want)
+	}
+	got = all(zeroTo99)
+	if want := rang(100); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange2:\n got: %v\nwant: %v", got, want)
+	}
+	got = all(empty)
+	if want := rang(0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange3:\n got: %v\nwant: %v", got, want)
+	}
+}
+
 func TestDeleteMax(t *testing.T) {
 	tr := New(3)
 	for _, v := range perm(100) {
@@ -211,6 +235,34 @@ func TestDeleteMax(t *testing.T) {
 	}
 	if want := rang(100); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ascendrange:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestImmutableDeleteMax(t *testing.T) {
+	builder := NewBuilder(NewImmutable(3))
+	for _, v := range perm(100) {
+		builder.ReplaceOrInsert(v)
+	}
+	zeroTo99 := builder.Build()
+	var got []Item
+	for v := builder.DeleteMax(); v != nil; v = builder.DeleteMax() {
+		got = append(got, v)
+	}
+	empty := builder.Build()
+	// Reverse our list.
+	for i := 0; i < len(got)/2; i++ {
+		got[i], got[len(got)-i-1] = got[len(got)-i-1], got[i]
+	}
+	if want := rang(100); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange:\n got: %v\nwant: %v", got, want)
+	}
+	got = all(zeroTo99)
+	if want := rang(100); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange2:\n got: %v\nwant: %v", got, want)
+	}
+	got = all(empty)
+	if want := rang(0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascendrange3:\n got: %v\nwant: %v", got, want)
 	}
 }
 
