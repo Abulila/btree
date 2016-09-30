@@ -206,6 +206,79 @@ func TestBTree(t *testing.T) {
 	}
 }
 
+func TestImmutableBTreeBuilderReuse(t *testing.T) {
+	builder := NewBuilder(NewImmutable(3))
+	for i := 0; i < 1000; i += 2 {
+		builder.ReplaceOrInsert(Int(i))
+	}
+	twos := builder.Build()
+	for i := 0; i < 1000; i += 4 {
+		builder.Delete(Int(i))
+	}
+	for i := 5; i < 1000; i += 10 {
+		builder.ReplaceOrInsert(Int(i))
+	}
+	minus4sPlusOdd5s := builder.Build()
+	builder.Set(twos)
+	for i := 0; i < 1000; i += 6 {
+		builder.Delete(Int(i))
+	}
+	for i := 7; i < 1000; i += 14 {
+		builder.ReplaceOrInsert(Int(i))
+	}
+	minus6sPlusOdd7s := builder.Build()
+
+	var want []Item
+
+	// Verify twos
+	for i := 0; i < 1000; i += 2 {
+		want = append(want, Int(i))
+	}
+	if got := twos.Len(); got != len(want) {
+		t.Fatalf("Expected %v, got %v", len(want), got)
+	}
+	got := all(twos)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+	}
+
+	// Verify minus4sPlusOdd5s
+	want = nil
+	for i := 2; i < 1000; i += 4 {
+		want = append(want, Int(i))
+	}
+	for i := 5; i < 1000; i += 10 {
+		want = append(want, Int(i))
+	}
+	want = sorted(want)
+	if got := minus4sPlusOdd5s.Len(); got != len(want) {
+		t.Fatalf("Expected %v, got %v", len(want), got)
+	}
+	got = all(minus4sPlusOdd5s)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+	}
+
+	// Verify minus6sPlusOdd7s
+	want = nil
+	for i := 2; i < 1000; i += 2 {
+		if i%6 != 0 {
+			want = append(want, Int(i))
+		}
+	}
+	for i := 7; i < 1000; i += 14 {
+		want = append(want, Int(i))
+	}
+	want = sorted(want)
+	if got := minus6sPlusOdd7s.Len(); got != len(want) {
+		t.Fatalf("Expected %v, got %v", len(want), got)
+	}
+	got = all(minus6sPlusOdd7s)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
 func ExampleImmutableBTree() {
 	empty := NewImmutable(*btreeDegree)
 	builder := NewBuilder(empty)
