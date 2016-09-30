@@ -45,8 +45,12 @@ func rang(n int) (out []Item) {
 	return
 }
 
+type ascender interface {
+	Ascend(ItemIterator)
+}
+
 // all extracts all items from a tree in order as a slice.
-func all(t *BTree) (out []Item) {
+func all(t ascender) (out []Item) {
 	t.Ascend(func(a Item) bool {
 		out = append(out, a)
 		return true
@@ -96,6 +100,54 @@ func TestBTree(t *testing.T) {
 			t.Fatalf("some left!: %v", got)
 		}
 	}
+}
+
+func ExampleImmutableBTree() {
+	empty := NewImmutable(*btreeDegree)
+	builder := NewBuilder(empty)
+	for i := Int(0); i < 10; i++ {
+		builder.ReplaceOrInsert(i)
+	}
+	zeroTo9 := builder.Build()
+	fmt.Println("len:       ", zeroTo9.Len())
+	fmt.Println("get3:      ", zeroTo9.Get(Int(3)))
+	fmt.Println("get100:    ", zeroTo9.Get(Int(100)))
+	builder.Set(zeroTo9)
+	fmt.Println("del4:      ", builder.Delete(Int(4)))
+	fmt.Println("del100:    ", builder.Delete(Int(100)))
+	fmt.Println("replace5:  ", builder.ReplaceOrInsert(Int(5)))
+	fmt.Println("replace100:", builder.ReplaceOrInsert(Int(100)))
+	fmt.Println("min:       ", builder.Min())
+	fmt.Println("delmin:    ", builder.DeleteMin())
+	fmt.Println("max:       ", builder.Max())
+	fmt.Println("delmax:    ", builder.DeleteMax())
+	fmt.Println("delmax:    ", builder.DeleteMax())
+	newTree := builder.Build()
+	fmt.Println("min:       ", newTree.Min())
+	fmt.Println("max:       ", newTree.Max())
+	fmt.Println("len:       ", newTree.Len())
+	fmt.Println("old min:   ", zeroTo9.Min())
+	fmt.Println("old max:   ", zeroTo9.Max())
+	fmt.Println("old len:   ", zeroTo9.Len())
+	// Output:
+	// len:        10
+	// get3:       3
+	// get100:     <nil>
+	// del4:       4
+	// del100:     <nil>
+	// replace5:   5
+	// replace100: <nil>
+	// min:        0
+	// delmin:     0
+	// max:        100
+	// delmax:     100
+	// delmax:     9
+	// min:        1
+	// max:        8
+	// len:        7
+	// old min:    0
+	// old max:    9
+	// old len:    10
 }
 
 func ExampleBTree() {

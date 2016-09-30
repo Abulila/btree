@@ -794,6 +794,61 @@ func NewBuilder(tree *ImmutableBTree) *Builder {
 	return result.Set(tree)
 }
 
+// AscendRange calls the iterator for every value in the tree within the range
+// [greaterOrEqual, lessThan), until iterator returns false.
+func (t *Builder) AscendRange(greaterOrEqual, lessThan Item, iterator ItemIterator) {
+	bt := (*BTree)(t.tree)
+	bt.AscendRange(greaterOrEqual, lessThan, iterator)
+}
+
+// AscendLessThan calls the iterator for every value in the tree within the range
+// [first, pivot), until iterator returns false.
+func (t *Builder) AscendLessThan(pivot Item, iterator ItemIterator) {
+	bt := (*BTree)(t.tree)
+	bt.AscendLessThan(pivot, iterator)
+}
+
+// AscendGreaterOrEqual calls the iterator for every value in the tree within
+// the range [pivot, last], until iterator returns false.
+func (t *Builder) AscendGreaterOrEqual(pivot Item, iterator ItemIterator) {
+	bt := (*BTree)(t.tree)
+	bt.AscendGreaterOrEqual(pivot, iterator)
+}
+
+// Ascend calls the iterator for every value in the tree within the range
+// [first, last], until iterator returns false.
+func (t *Builder) Ascend(iterator ItemIterator) {
+	bt := (*BTree)(t.tree)
+	bt.Ascend(iterator)
+}
+
+// Get looks for the key item in the tree, returning it.  It returns nil if
+// unable to find that item.
+func (t *Builder) Get(key Item) Item {
+	bt := (*BTree)(t.tree)
+	return bt.Get(key)
+}
+
+// Min returns the smallest item in the tree, or nil if the tree is empty.
+func (t *Builder) Min() Item {
+	return min(t.tree.root)
+}
+
+// Max returns the largest item in the tree, or nil if the tree is empty.
+func (t *Builder) Max() Item {
+	return max(t.tree.root)
+}
+
+// Has returns true if the given key is in the tree.
+func (t *Builder) Has(key Item) bool {
+	return t.tree.Get(key) != nil
+}
+
+// Len returns the number of items currently in the tree.
+func (t *Builder) Len() int {
+	return t.tree.length
+}
+
 // Set sets this Builder to tree and returns a reference to itself.
 func (t *Builder) Set(tree *ImmutableBTree) *Builder {
 	t.tree = tree
