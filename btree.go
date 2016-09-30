@@ -703,20 +703,15 @@ func (t *BTree) Len() int {
 	return t.length
 }
 
-// BTree is an implementation of a B-Tree.
-//
-// BTree stores Item instances in an ordered structure, allowing easy insertion,
-// removal, and iteration.
-//
-// Write operations are not safe for concurrent mutation by multiple
-// goroutines, but Read operations are.
+// ImmutableBTree is an immutable version of BTree safe to use with
+// multiple goroutines.
 type ImmutableBTree struct {
 	op     *btreeOp
 	length int
 	root   *node
 }
 
-// NewImmutable creates a new B-Tree with the given degree.
+// NewImmutable creates a an empty, immutable btree with given degree.
 //
 // New(2), for example, will create a 2-3-4 tree (each node contains 1-3 items
 // and 2-4 children).
@@ -786,17 +781,20 @@ func (t *ImmutableBTree) Len() int {
 	return t.length
 }
 
+// Builder builds ImmutableBTree intances.
 type Builder struct {
 	copied    bool
 	tree      *ImmutableBTree
 	writables copyOnWriteSet
 }
 
+// NewBuilder returns a new Builder initialised with tree.
 func NewBuilder(tree *ImmutableBTree) *Builder {
 	result := &Builder{}
 	return result.Set(tree)
 }
 
+// Set sets this Builder to tree and returns a reference to itself.
 func (t *Builder) Set(tree *ImmutableBTree) *Builder {
 	t.tree = tree
 	t.copied = false
@@ -835,6 +833,7 @@ func (t *Builder) DeleteMax() Item {
 	return bt.deleteItem(nil, removeMax, t.writables)
 }
 
+// Build returns the immutable btree.
 func (t *Builder) Build() *ImmutableBTree {
 	result := t.tree
 	t.Set(result)
