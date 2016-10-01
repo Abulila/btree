@@ -784,6 +784,28 @@ func (t *ImmutableBTree) Len() int {
 }
 
 // Builder builds ImmutableBTree intances.
+//
+// A Builder instance has all the same methods as a BTree instance plus a
+// Set method and a Build method. Set changes a builder instance to have the
+// same Items and degree as a given ImmutableBTree instance; Build returns
+// an ImmutableBTree instance that has the same Items and degree as the
+// Builder instance.
+//
+// Calling Set on a Builder runs in constant time and space. Mutating
+// methods on Builder instances employ copy-on-write. The first mutating
+// method called on a Builder instance after a Set method will copy O(log N)
+// nodes of the ImmutableBTree instance passed to the Set method. As the
+// Builder instance acquires its own copies of more and more nodes from
+// the original ImmutableBTree instance, each successive call to its mutating
+// methods copies fewer and fewer nodes.
+//
+// Calling Build also runs in constant time and space. After calling Build,
+// the Builder instance shares all of its nodes with the built ImmutableBTree
+// instance. The next call to a mutable method on the Builder instance will
+// copy O(log N) nodes.
+//
+// Write operations are not safe for concurrent mutation by multiple
+// goroutines, but Read operations are.
 type Builder struct {
 	copied    bool
 	tree      *ImmutableBTree
