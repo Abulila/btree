@@ -287,6 +287,104 @@ func TestImmutableBTreeBuilderReuse(t *testing.T) {
 	}
 }
 
+func TestInsertExistingImmutableBTree(t *testing.T) {
+	const initialSize = 10000
+	const batchSize = 100
+	// 0,2,4,6,...,19998
+	insertP := permf(initialSize, func(i int) int { return 2 * i })
+	builder := NewBuilder(NewImmutable(*btreeDegree))
+	for _, item := range insertP {
+		builder.ReplaceOrInsert(item)
+	}
+	tr := builder.Build()
+	var trees [10]*ImmutableBTree
+	var batches [10][]Item
+	for i := range trees {
+		// 1, 201, 401, 601,..., 19801
+		batches[i] = permf(
+			batchSize,
+			func(i int) int {
+				return 2*i*(initialSize/batchSize) + 1
+			})
+		builder := NewBuilder(tr)
+		for _, item := range batches[i] {
+			builder.ReplaceOrInsert(item)
+		}
+		trees[i] = builder.Build()
+	}
+	// Test each of the trees
+	for i := range trees {
+		got := all(trees[i])
+		var want []Item
+		want = append(want, insertP...)
+		want = append(want, batches[i]...)
+		want = sorted(want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+		}
+		if got, want := trees[i].Len(), initialSize+batchSize; got != want {
+			t.Fatalf("got size: %v\nwant: %v", got, want)
+		}
+	}
+	// Test tr
+	got := all(tr)
+	want := sorted(insertP)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+	}
+	if got, want := tr.Len(), initialSize; got != want {
+		t.Fatalf("got size: %v\nwant: %v", got, want)
+	}
+}
+
+func TestDeleteExistingImmutableBTree(t *testing.T) {
+	const initialSize = 10000
+	const batchSize = 100
+	// 0,1,2,3,...,9999
+	insertP := perm(initialSize)
+	builder := NewBuilder(NewImmutable(*btreeDegree))
+	for _, item := range insertP {
+		builder.ReplaceOrInsert(item)
+	}
+	tr := builder.Build()
+	var trees [10]*ImmutableBTree
+	var batches [10][]Item
+	for i := range trees {
+		// 0, 100, 200, 300,..., 9900
+		batches[i] = permf(
+			batchSize,
+			func(i int) int {
+				return i * (initialSize / batchSize)
+			})
+		builder := NewBuilder(tr)
+		for _, item := range batches[i] {
+			builder.Delete(item)
+		}
+		trees[i] = builder.Build()
+	}
+	// Test each of the trees
+	for i := range trees {
+		got := all(trees[i])
+		want := difference(
+			rang(initialSize), sorted(batches[i]))
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+		}
+		if got, want := trees[i].Len(), initialSize-batchSize; got != want {
+			t.Fatalf("got size: %v\nwant: %v", got, want)
+		}
+	}
+	// Test tr
+	got := all(tr)
+	want := sorted(insertP)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mismatch:\n got: %v\nwant: %v", got, want)
+	}
+	if got, want := tr.Len(), initialSize; got != want {
+		t.Fatalf("got size: %v\nwant: %v", got, want)
+	}
+}
+
 func ExampleImmutableBTree() {
 	empty := NewImmutable(*btreeDegree)
 	builder := NewBuilder(empty)
