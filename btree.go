@@ -216,10 +216,11 @@ type node struct {
 // containing all items/children after it.
 func (n *node) split(i int, writables copyOnWriteSet) (Item, *node) {
 	item := n.items[i]
-	next := newNode(n.op, writables)
+        hasChildren := len(n.children) > 0
+	next := newNode(n.op, writables, hasChildren)
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
-	if len(n.children) > 0 {
+	if hasChildren {
 		next.children = append(next.children, n.children[i+1:]...)
 		n.children = n.children[:i+1]
 	}
@@ -476,8 +477,13 @@ func (n *node) print(w io.Writer, level int) {
 
 type copyOnWriteSet map[*node]bool
 
-func (s copyOnWriteSet) newNode(op *btreeOp) *node {
-	result := &node{op: op}
+func (s copyOnWriteSet) newNode(op *btreeOp, withChildren bool) *node {
+	result := &node{
+           op: op,
+           items: make(items, 0, op.maxItems())}
+        if withChildren {
+           result.children = make(children, 0, op.maxItems() + 1)
+        }
 	s[result] = true
 	return result
 }
@@ -486,9 +492,10 @@ func (s copyOnWriteSet) writableNode(n *node) *node {
 	if s == nil || s[n] {
 		return n
 	}
-	result := s.newNode(n.op)
+        hasChildren := len(n.children) > 0
+	result := s.newNode(n.op, hasChildren)
 	result.items = append(result.items, n.items...)
-	if len(n.children) > 0 {
+	if hasChildren {
 		result.children = append(result.children, n.children...)
 	}
 	return result
@@ -529,11 +536,11 @@ func (o *btreeOp) freeNode(n *node) {
 	o.freelist.freeNode(n)
 }
 
-func newNode(op *btreeOp, writables copyOnWriteSet) *node {
+func newNode(op *btreeOp, writables copyOnWriteSet, withChildren bool) *node {
 	if writables == nil {
 		return op.newNode()
 	}
-	return writables.newNode(op)
+	return writables.newNode(op, withChildren)
 }
 
 func freeNode(n *node, op *btreeOp, writables copyOnWriteSet) {
@@ -563,7 +570,7 @@ func (t *BTree) replaceOrInsert(item Item, writables copyOnWriteSet) Item {
 	}
 	if t.root == nil {
 
-		t.root = newNode(t.op, writables)
+		t.root = newNode(t.op, writables, false)
 		t.root.items = append(t.root.items, item)
 		t.length++
 		return nil
@@ -571,7 +578,7 @@ func (t *BTree) replaceOrInsert(item Item, writables copyOnWriteSet) Item {
 		t.root = writables.writableNode(t.root)
 		item2, second := t.root.split(t.op.maxItems()/2, writables)
 		oldroot := t.root
-		t.root = newNode(t.op, writables)
+		t.root = newNode(t.op, writables, true)
 		t.root.items = append(t.root.items, item2)
 		t.root.children = append(t.root.children, oldroot, second)
 	}
