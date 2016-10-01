@@ -64,6 +64,14 @@ func perm(n int) (out []Item) {
 	return
 }
 
+// permf applies f to each element in a random permutation of range [0, n).
+func permf(n int, f func(i int) int) (out []Item) {
+	for _, v := range rand.Perm(n) {
+		out = append(out, Int(f(v)))
+	}
+	return
+}
+
 // rang returns an ordered list of Int items in the range [0, n).
 func rang(n int) (out []Item) {
 	for i := 0; i < n; i++ {
@@ -522,6 +530,7 @@ func TestAscendGreaterOrEqual(t *testing.T) {
 }
 
 const benchmarkTreeSize = 10000
+const batchModificationSize = 100
 
 func BenchmarkInsert(b *testing.B) {
 	b.StopTimer()
@@ -554,6 +563,36 @@ func BenchmarkBuilderInsert(b *testing.B) {
 				return
 			}
 		}
+	}
+}
+
+func BenchmarkImmutableInsert(b *testing.B) {
+	b.StopTimer()
+	// 0,2,4,6,...,19998
+	insertP := permf(benchmarkTreeSize, func(i int) int { return 2 * i })
+	// 1,201,401,601,...,19801
+	insertB := permf(
+		batchModificationSize,
+		func(i int) int {
+			return 2*i*(benchmarkTreeSize/batchModificationSize) + 1
+		})
+	builder := NewBuilder(NewImmutable(*btreeDegree))
+	for _, item := range insertP {
+		builder.ReplaceOrInsert(item)
+	}
+	tr := builder.Build()
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		builder := NewBuilder(tr)
+		for _, item := range insertB {
+			builder.ReplaceOrInsert(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+		builder.Build()
 	}
 }
 
