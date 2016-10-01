@@ -540,6 +540,23 @@ func BenchmarkInsert(b *testing.B) {
 	}
 }
 
+func BenchmarkBuilderInsert(b *testing.B) {
+	b.StopTimer()
+	insertP := perm(benchmarkTreeSize)
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		builder := NewBuilder(NewImmutable(*btreeDegree))
+		for _, item := range insertP {
+			builder.ReplaceOrInsert(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+	}
+}
+
 func BenchmarkDelete(b *testing.B) {
 	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
@@ -566,6 +583,32 @@ func BenchmarkDelete(b *testing.B) {
 	}
 }
 
+func BenchmarkBuilderDelete(b *testing.B) {
+	b.StopTimer()
+	insertP := perm(benchmarkTreeSize)
+	removeP := perm(benchmarkTreeSize)
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		b.StopTimer()
+		builder := NewBuilder(NewImmutable(*btreeDegree))
+		for _, v := range insertP {
+			builder.ReplaceOrInsert(v)
+		}
+		b.StartTimer()
+		for _, item := range removeP {
+			builder.Delete(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+		if builder.Len() > 0 {
+			panic(builder.Len())
+		}
+	}
+}
+
 func BenchmarkGet(b *testing.B) {
 	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
@@ -578,6 +621,30 @@ func BenchmarkGet(b *testing.B) {
 		for _, v := range insertP {
 			tr.ReplaceOrInsert(v)
 		}
+		b.StartTimer()
+		for _, item := range removeP {
+			tr.Get(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+	}
+}
+
+func BenchmarkImmutableGet(b *testing.B) {
+	b.StopTimer()
+	insertP := perm(benchmarkTreeSize)
+	removeP := perm(benchmarkTreeSize)
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		b.StopTimer()
+		builder := NewBuilder(NewImmutable(*btreeDegree))
+		for _, v := range insertP {
+			builder.ReplaceOrInsert(v)
+		}
+		tr := builder.Build()
 		b.StartTimer()
 		for _, item := range removeP {
 			tr.Get(item)
