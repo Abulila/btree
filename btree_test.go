@@ -648,6 +648,36 @@ func BenchmarkBuilderDelete(b *testing.B) {
 	}
 }
 
+func BenchmarkImmutableDelete(b *testing.B) {
+	b.StopTimer()
+	// 0,1,2,3,...,9999
+	insertP := perm(benchmarkTreeSize)
+	// 0,100,200,...,9900
+	deleteB := permf(
+		batchModificationSize,
+		func(i int) int {
+			return i * (benchmarkTreeSize / batchModificationSize)
+		})
+	builder := NewBuilder(NewImmutable(*btreeDegree))
+	for _, item := range insertP {
+		builder.ReplaceOrInsert(item)
+	}
+	tr := builder.Build()
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		builder := NewBuilder(tr)
+		for _, item := range deleteB {
+			builder.Delete(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+		builder.Build()
+	}
+}
+
 func BenchmarkGet(b *testing.B) {
 	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
