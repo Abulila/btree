@@ -539,7 +539,9 @@ func newNode(op *btreeOp, writables copyOnWriteSet) *node {
 func freeNode(n *node, op *btreeOp, writables copyOnWriteSet) {
 	if writables == nil {
 		op.freeNode(n)
+		return
 	}
+	delete(writables, n)
 }
 
 // BTree is an implementation of a B-Tree.
