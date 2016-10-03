@@ -518,8 +518,13 @@ func (n *node) print(w io.Writer, level int) {
 	}
 }
 
+// copyOnWriteSet is the set of nodes that have been copied for writing for
+// a particular builder. The builder can safely write to nodes in this set as
+// these nodes are not shared. Only the builder can reach these nodes.
 type copyOnWriteSet map[*node]bool
 
+// newNode creates a new node and adds it to this set. withChildren is true
+// if newNode is to hold child pointers.
 func (s copyOnWriteSet) newNode(op *btreeOp, withChildren bool) *node {
 	result := &node{
 		op:    op,
@@ -531,6 +536,9 @@ func (s copyOnWriteSet) newNode(op *btreeOp, withChildren bool) *node {
 	return result
 }
 
+// writableNode returns a writable version of n by copying n, adding the copy
+// to this set, and returning the copy. If n is already in this set,
+// writableNode returns n itself.
 func (s copyOnWriteSet) writableNode(n *node) *node {
 	if s == nil || s[n] {
 		return n
@@ -544,8 +552,13 @@ func (s copyOnWriteSet) writableNode(n *node) *node {
 	return result
 }
 
+// btreeOp handles operations common to all nodes within the same btree such
+// as computing the minimum and maximum number of items. All nodes within the
+// same btree share the same btreeOp instance.
 type btreeOp struct {
-	degree   int
+	// degree of the btree
+	degree int
+	// The btree's freelist. nil for ImmutableBtree instances.
 	freelist *FreeList
 }
 
@@ -560,12 +573,16 @@ func (o *btreeOp) minItems() int {
 	return o.degree - 1
 }
 
+// newNode returns a new, possibly recycles, node for the btree using the
+// btree's freelist. newNode panics if the btree is immutable.
 func (o *btreeOp) newNode() (n *node) {
 	n = o.freelist.newNode()
 	n.op = o
 	return
 }
 
+// freeNode frees or recycles a node for the btree using the btree's freelist.
+// freeNode panics if the btree is immutable.
 func (o *btreeOp) freeNode(n *node) {
 	for i := range n.items {
 		n.items[i] = nil // clear to allow GC
@@ -579,6 +596,9 @@ func (o *btreeOp) freeNode(n *node) {
 	o.freelist.freeNode(n)
 }
 
+// newNode creates a new node for either a mutable or immutable btree.
+// op is the btree's btreeOp instance. For immutable btrees, writables must
+// be non-nil. withChildren is true if the new node is to have children.
 func newNode(op *btreeOp, writables copyOnWriteSet, withChildren bool) *node {
 	if writables == nil {
 		return op.newNode()
@@ -586,6 +606,9 @@ func newNode(op *btreeOp, writables copyOnWriteSet, withChildren bool) *node {
 	return writables.newNode(op, withChildren)
 }
 
+// freeNode frees a node for either a mutable or immutable btree.
+// op is the btree's btreeOp instance. For immutable btrees, writables must
+// be non-nil.
 func freeNode(n *node, op *btreeOp, writables copyOnWriteSet) {
 	if writables == nil {
 		op.freeNode(n)
