@@ -208,7 +208,6 @@ func (s *children) pop() (out *node) {
 type node struct {
 	items    items
 	children children
-	degree int
 }
 
 // split splits the given node at the given index.  The current node shrinks,
@@ -217,7 +216,7 @@ type node struct {
 func (n *node) split(i int, context *btreeContext) (Item, *node) {
 	item := n.items[i]
 	hasChildren := len(n.children) > 0
-	next := context.newNode(n.degree)
+	next := context.newNode()
 	next.items = append(next.items, n.items[i+1:]...)
 	n.items = n.items[:i]
 	if hasChildren {
@@ -542,9 +541,8 @@ func (c *btreeContext) noneShared() {
   c.writables = nil
 }
 
-func (c *btreeContext) newNode(degree int) *node {
+func (c *btreeContext) newNode() *node {
    result := c.freelist.newNode()
-   result.degree = degree
    if c.writables != nil {
      c.writables[result] = true
    }
@@ -573,7 +571,7 @@ func (c *btreeContext) writableNode(n *node) *node {
 		return n
 	}
 	hasChildren := len(n.children) > 0
-	result := c.newNode(n.degree)
+	result := c.newNode()
 	result.items = append(result.items, n.items...)
 	if hasChildren {
 		result.children = append(result.children, n.children...)
@@ -710,7 +708,7 @@ func (t *ImmutableBTree) replaceOrInsert(
 	}
 	if t.root == nil {
 
-		t.root = context.newNode(t.degree)
+		t.root = context.newNode()
 		t.root.items = append(t.root.items, item)
 		t.length++
 		return nil
@@ -718,7 +716,7 @@ func (t *ImmutableBTree) replaceOrInsert(
 		t.root = context.writableNode(t.root)
 		item2, second := t.root.split(maxItems(t.degree)/2, context)
 		oldroot := t.root
-		t.root = context.newNode(t.degree)
+		t.root = context.newNode()
 		t.root.items = append(t.root.items, item2)
 		t.root.children = append(t.root.children, oldroot, second)
 	}
