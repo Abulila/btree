@@ -116,7 +116,7 @@ func NewWithFreeList(degree int, f *FreeList) *BTree {
 		panic("bad degree")
 	}
 	return &BTree{
-                tree: NewImmutable(degree),
+		tree: NewImmutable(degree),
 		context: btreeContext{
 			freelist: f,
 		},
@@ -528,44 +528,58 @@ func minItems(d int) int {
 	return d - 1
 }
 
+// btreeContext handles the sharing of nodes.
+//
+// Each BTree instance has its own context which keeps track of which
+// nodes in the btree are shared and which nodes are unshared.
 type btreeContext struct {
-  writables map[*node]bool
-  freelist *FreeList
+	// writables is the set of nodes btree can safely write to. That is,
+	// the set of nodes that are unshared. nil means all nodes are unshared.
+	// empty means all nodes are shared.
+	writables map[*node]bool
+	freelist  *FreeList
 }
 
-func (c *btreeContext) allShared() {
-  c.writables = make(map[*node]bool)
+// shared makes marks all nodes shared.
+func (c *btreeContext) shared() {
+	c.writables = make(map[*node]bool)
 }
 
-func (c *btreeContext) noneShared() {
-  c.writables = nil
+// unShared marks all nodes unshared.
+func (c *btreeContext) unShared() {
+	c.writables = nil
 }
 
+// newNode returns a new node.
 func (c *btreeContext) newNode() *node {
-   result := c.freelist.newNode()
-   if c.writables != nil {
-     c.writables[result] = true
-   }
-   return result
+	result := c.freelist.newNode()
+	if c.writables != nil {
+		c.writables[result] = true
+	}
+	return result
 }
 
+// freeNode frees given node.
 func (c *btreeContext) freeNode(n *node) {
-  if c.writables == nil || c.writables[n] {
-	for i := range n.items {
-		n.items[i] = nil // clear to allow GC
+	if c.writables == nil || c.writables[n] {
+		for i := range n.items {
+			n.items[i] = nil // clear to allow GC
+		}
+		n.items = n.items[:0]
+		for i := range n.children {
+			n.children[i] = nil // clear to allow GC
+		}
+		n.children = n.children[:0]
+		if c.writables != nil {
+			delete(c.writables, n)
+		}
+		c.freelist.freeNode(n)
 	}
-	n.items = n.items[:0]
-	for i := range n.children {
-		n.children[i] = nil // clear to allow GC
-	}
-	n.children = n.children[:0]
-        if c.writables != nil {
-           delete(c.writables, n)
-        }
-	c.freelist.freeNode(n)
-  }
 }
 
+// writableNode returns a writable version of n by copying n and marking
+// the copy unshared. If n is already unshared, writeableNode returns
+// n itself.
 func (c *btreeContext) writableNode(n *node) *node {
 	if c.writables == nil || c.writables[n] {
 		return n
@@ -702,7 +716,7 @@ func (t *ImmutableBTree) Len() int {
 }
 
 func (t *ImmutableBTree) replaceOrInsert(
-    item Item, context *btreeContext) Item {
+	item Item, context *btreeContext) Item {
 	if item == nil {
 		panic("nil item being added to BTree")
 	}
@@ -754,8 +768,8 @@ func (t *ImmutableBTree) deleteItem(
 // Write operations are not safe for concurrent mutation by multiple
 // goroutines, but Read operations are.
 type BTree struct {
-	copied    bool
-	tree      *ImmutableBTree
+	copied  bool
+	tree    *ImmutableBTree
 	context btreeContext
 }
 
@@ -841,7 +855,7 @@ func (t *BTree) Descend(iterator ItemIterator) {
 // Get looks for the key item in the tree, returning it.  It returns nil if
 // unable to find that item.
 func (t *BTree) Get(key Item) Item {
-    return t.tree.Get(key)
+	return t.tree.Get(key)
 }
 
 // Min returns the smallest item in the tree, or nil if the tree is empty.
@@ -865,18 +879,31 @@ func (t *BTree) Len() int {
 }
 
 // Set sets this BTree to tree and returns a reference to itself.
+
+// Set runs in constant time. After Set returns tree and this btree share
+// the same nodes. Subsequent changes to this instance employ copy-on-write
+// techniques. The first subsequent change will copy the log(N) nodes that
+// change. As this instance acquires its own copy of more and more nodes,
+// each subsequent change will copy fewer and fewer nodes.
 func (t *BTree) Set(tree *ImmutableBTree) *BTree {
 	t.tree = tree
 	t.copied = false
-        if t.tree.root == nil {
-	  t.context.noneShared()
-        } else {
-          t.context.allShared()
-        }
+	if t.tree.root == nil {
+		t.context.unShared()
+	} else {
+		t.context.shared()
+	}
 	return t
 }
 
 // Snapshot returns a snapshot of this btree.
+
+// Snapshot runs in constant time. After Snapshot returns this btree
+// and the returned immutable btree share the same nodes.
+//  Subsequent changes to this instance employ copy-on-write
+// techniques. The first subsequent change will copy the log(N) nodes that
+// change. As this instance acquires its own copy of more and more nodes,
+// each subsequent change will copy fewer and fewer nodes.
 func (t *BTree) Snapshot() *ImmutableBTree {
 	result := t.tree
 	t.Set(result)
